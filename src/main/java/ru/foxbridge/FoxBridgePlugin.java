@@ -23,6 +23,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
     private Path data, plugins, logs, staging, backups;
     private volatile byte[] keyHash;
     private final Map<String, Rate> rates = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicBoolean diagnosticRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Override public void onEnable() {
         saveDefaultConfig();
@@ -112,10 +113,30 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         String sub = args.length == 0 ? "status" : args[0].toLowerCase(Locale.ROOT);
         if (sub.equals("diagnose") || sub.equals("diag")) {
             if (!(sender instanceof ConsoleCommandSender)) {
-                sender.sendMessage("§c[FoxBridge] Диагностика доступна только из консоли сервера.");
+                sendDiagnostic(sender, "§c[FoxBridge] Диагностика доступна только из консоли сервера.");
                 return true;
             }
-            diagnose(sender);
+            if (!diagnosticRunning.compareAndSet(false, true)) {
+                sender.sendMessage("§e[FoxBridge] Диагностика уже выполняется.");
+                return true;
+            }
+            String bind = getConfig().getString("server.bind_address", "127.0.0.1");
+            int port = getConfig().getInt("server.port", 25965);
+            boolean tls = getConfig().getBoolean("tls.enabled", false);
+            try {
+                Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+                    try {
+                        diagnose(sender, bind, port, tls);
+                    } catch (Exception e) {
+                        sendDiagnostic(sender, "§cОшибка диагностики: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                    } finally {
+                        diagnosticRunning.set(false);
+                    }
+                });
+            } catch (Exception e) {
+                diagnosticRunning.set(false);
+                sender.sendMessage("§c[FoxBridge] Не удалось запустить диагностику: " + e.getMessage());
+            }
             return true;
         }
         if (sub.equals("status")) {
@@ -155,7 +176,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         return true;
     }
 
-    private void diagnose(CommandSender sender) {
+    private void diagnose(CommandSender sender, String bind, int port, boolean tls) {
         sender.sendMessage("§6========== FoxBridge: диагностика хостинга ==========");
         sender.sendMessage("§eJava: §f" + System.getProperty("java.version"));
         sender.sendMessage("§eОС: §f" + System.getProperty("os.name") + " / " + System.getProperty("os.arch"));
@@ -188,6 +209,12 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         sender.sendMessage("§eTLS API: §f" + (getConfig().getBoolean("tls.enabled", false) ? "включён" : "выключен"));
         sender.sendMessage("§aДиагностика завершена. Настройки и сетевые порты не изменялись.");
         sender.sendMessage("§6==================================================");
+    }
+
+    private void sendDiagnostic(CommandSender sender, String message) {
+        Bukkit.getScheduler().runTask(this, () -> {
+            if (isEnabled()) sender.sendMessage(message);
+        });
     }
 
     private String testHttps(String address) {
