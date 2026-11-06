@@ -199,7 +199,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             } catch (Exception e) { sender.sendMessage("§cОшибка: " + e.getMessage()); }
             return true;
         }
-        sender.sendMessage("§eИспользование: /foxbridge <status|reload|resetkey|approve>");
+        sender.sendMessage("§eИспользование: /foxbridge <status|diagnose|diag|cloudflared|reload|resetkey|approve>");
         return true;
     }
 
@@ -398,7 +398,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             char ch = json.charAt(i);
             if (quoted) {
                 if (escaped) escaped = false;
-                else if (ch == '\\\\') escaped = true;
+                else if (ch == 92) escaped = true;
                 else if (ch == '"') quoted = false;
             } else {
                 if (ch == '"') quoted = true;
