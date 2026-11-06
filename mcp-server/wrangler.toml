@@ -3,11 +3,19 @@ main = "src/index.ts"
 compatibility_date = "2026-11-06"
 compatibility_flags = ["nodejs_compat"]
 
+[[durable_objects.bindings]]
+name = "FOXBRIDGE_REGISTRY"
+class_name = "FoxBridgeRegistry"
 
-# Set secrets with:
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FoxBridgeRegistry"]
+
+# Required Worker secrets:
 # npx wrangler secret put MCP_ACCESS_TOKEN
 # npx wrangler secret put FOXBRIDGE_API_KEY
-# npx wrangler secret put FOXBRIDGE_BASE_URL
+# npx wrangler secret put FOXBRIDGE_REGISTRATION_TOKEN
 #
-# FOXBRIDGE_BASE_URL must be an HTTPS address reachable from Cloudflare Workers.
-# Do not point it at 127.0.0.1 or a private panel address.
+# FoxBridge sends its current HTTPS Quick Tunnel URL to /register.
+# The Worker stores the latest registration in the Durable Object.
+# No static FOXBRIDGE_BASE_URL is required.
