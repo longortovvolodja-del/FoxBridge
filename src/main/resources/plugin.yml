@@ -1,5 +1,5 @@
 name: FoxBridge
-version: 1.0.0
+version: 1.0.1
 main: ru.foxbridge.FoxBridgePlugin
 api-version: '1.18'
 author: FoxBridge
