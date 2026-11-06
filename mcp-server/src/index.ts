@@ -6,7 +6,6 @@ interface Env {
   MCP_ACCESS_TOKEN: string;
   FOXBRIDGE_BASE_URL: string;
   FOXBRIDGE_API_KEY: string;
-  FOXBRIDGE_API_KEY_HEADER?: string;
 }
 
 const MAX_RESPONSE_BYTES = 512 * 1024;
@@ -30,11 +29,9 @@ async function foxbridgeGet(env: Env, route: string): Promise<string> {
   const url = new URL(route, base);
   if (url.origin !== base.origin) throw new Error("Invalid backend route");
 
-  const headerName = env.FOXBRIDGE_API_KEY_HEADER;
-  if (!headerName) throw new Error("FOXBRIDGE_API_KEY_HEADER is not configured");
   const response = await fetch(url, {
     method: "GET",
-    headers: { [headerName]: env.FOXBRIDGE_API_KEY, "Accept": "application/json" },
+    headers: { "Authorization": `Bearer ${env.FOXBRIDGE_API_KEY}`, "Accept": "application/json" },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   });
 
