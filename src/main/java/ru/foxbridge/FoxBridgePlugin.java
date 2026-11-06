@@ -384,6 +384,11 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
                             .redirectErrorStream(true)
                             .redirectOutput(logFile.toFile())
                             .start();
+                    // Track the child immediately so plugin shutdown can always stop it,
+                    // including while we are still waiting for the Quick Tunnel URL.
+                    tunnelProcess = process;
+                    tunnelUrl = null;
+                    tunnelLogFile = logFile;
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
                     String url = null;
                     while (System.nanoTime() < deadline && process.isAlive()) {
@@ -425,6 +430,11 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
                         process.destroy();
                         try { if (!process.waitFor(3, TimeUnit.SECONDS)) process.destroyForcibly(); }
                         catch (InterruptedException e) { Thread.currentThread().interrupt(); process.destroyForcibly(); }
+                    }
+                    if (process != null && tunnelProcess == process) {
+                        tunnelProcess = null;
+                        tunnelUrl = null;
+                        tunnelLogFile = null;
                     }
                     tunnelStarting.set(false);
                 }
