@@ -172,7 +172,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         sender.sendMessage("§eПроверка исходящего HTTPS (Cloudflare)... §f" + testHttps("https://www.cloudflare.com/cdn-cgi/trace"));
         sender.sendMessage("§eПроверка исходящего HTTPS (GitHub)... §f" + testHttps("https://github.com/"));
 
-        sender.sendMessage("§eПроверка кратковременного фонового процесса (8 секунд)... §f" + testLongRunningProcess());
+        sender.sendMessage("§eПроверка фонового процесса (10 секунд наблюдения)... §f" + testLongRunningProcess());
 
         Path cloudflared = findExecutable("cloudflared");
         if (cloudflared == null) {
@@ -214,17 +214,19 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
     private String testLongRunningProcess() {
         Process process = null;
         try {
-            process = new ProcessBuilder("sh", "-c", "sleep 8")
+            // Проверяем, что хостинг не завершает дочерний процесс сразу после запуска.
+            // Процесс намеренно ограничен по времени и всегда останавливается диагностикой.
+            process = new ProcessBuilder("sh", "-c", "sleep 15")
                     .redirectErrorStream(true)
                     .start();
-            if (process.waitFor(2, TimeUnit.SECONDS)) {
-                return "процесс завершился раньше проверки (код " + process.exitValue() + ")";
+            if (process.waitFor(10, TimeUnit.SECONDS)) {
+                return "процесс завершился раньше 10 секунд (код " + process.exitValue() + ")";
             }
             boolean alive = process.isAlive();
             process.destroyForcibly();
             process.waitFor(2, TimeUnit.SECONDS);
             return alive
-                    ? "успешно: дочерний процесс оставался активным 2 секунды; тестовый процесс остановлен"
+                    ? "успешно: дочерний процесс оставался активным 10 секунд; тестовый процесс остановлен"
                     : "процесс неожиданно завершился до проверки";
         } catch (SecurityException e) {
             return "запуск запрещён политикой безопасности Java/хостинга";
