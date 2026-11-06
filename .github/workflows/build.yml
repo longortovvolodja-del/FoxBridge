@@ -20,9 +20,15 @@ jobs:
           cache: maven
       - name: Build FoxBridge
         run: mvn -B clean package
-      - name: Upload plugin JAR
+      - name: Generate SHA-256 checksum
+        run: |
+          cd target
+          sha256sum FoxBridge-1.0.0.jar > FoxBridge-1.0.0.jar.sha256
+      - name: Upload plugin JAR and checksum
         uses: actions/upload-artifact@v4
         with:
           name: FoxBridge-1.0.0
-          path: target/FoxBridge-1.0.0.jar
+          path: |
+            target/FoxBridge-1.0.0.jar
+            target/FoxBridge-1.0.0.jar.sha256
           if-no-files-found: error
