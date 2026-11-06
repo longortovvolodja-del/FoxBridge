@@ -2,7 +2,13 @@
 
 Private MCP gateway that exposes a small, read-only set of FoxBridge operations to ChatGPT.
 
-## Initial tools
+## Components and versions
+
+- FoxBridge Java plugin: **1.0.1** (Paper 1.18.2, Java 17)
+- FoxBridge-MCP Worker: **0.1.1**
+- The MCP service is external to Minecraft; it is not a second Paper plugin and does not produce a JAR.
+
+## MCP tools
 
 - `foxbridge_status` — Minecraft server status
 - `foxbridge_list_plugins` — installed plugins
@@ -12,46 +18,91 @@ Private MCP gateway that exposes a small, read-only set of FoxBridge operations 
 
 The gateway does **not** expose arbitrary console commands, arbitrary HTTP proxying, file deletion, or automatic plugin installation.
 
-## Deploy to Cloudflare Workers
+## Dynamic tunnel registration
 
-1. Install Node.js 20+ and run `npm install` in this directory.
-2. Set secrets:
-   ```sh
-   npx wrangler secret put MCP_ACCESS_TOKEN
-   npx wrangler secret put FOXBRIDGE_API_KEY
-   npx wrangler secret put FOXBRIDGE_BASE_URL
-   ```
-3. The gateway sends the FoxBridge key as `Authorization: Bearer <key>`.
-4. Run `npm run typecheck`, then `npm run deploy`.
-5. The MCP endpoint will be `https://<worker-name>.<account>.workers.dev/mcp`.
+The Worker has a stable HTTPS address. The Minecraft server's Cloudflare Quick Tunnel URL may change after a restart. FoxBridge now registers its current URL with the Worker and sends a heartbeat every 45 seconds. The Worker stores the latest URL in a Durable Object and treats registrations older than 120 seconds as stale.
 
-Never commit secrets to GitHub or paste them into chat.
+There is no static `FOXBRIDGE_BASE_URL` secret and no need to manually copy a new Quick Tunnel URL after a restart.
 
-## Network connection through FoxBridge
+## 1. Deploy to Cloudflare Workers
 
-The recommended initial route is a Cloudflare Quick Tunnel started by the FoxBridge plugin. The plugin keeps the API bound to loopback (normally `127.0.0.1:25965`); cloudflared creates an outbound HTTPS tunnel to that local API.
+Requirements: Node.js 22+, npm, and a Cloudflare account with Workers and Durable Objects enabled.
 
-On the Minecraft server console:
+From this directory:
 
-1. Run `foxbridge cloudflared` once to download the official Linux amd64 binary and verify its SHA-256.
-2. Run `foxbridge tunnel start`.
-3. Copy the generated `https://….trycloudflare.com` URL from the console.
-4. Set the Cloudflare Worker secret `FOXBRIDGE_BASE_URL` to that URL (without a path).
-5. Keep `FOXBRIDGE_API_KEY` as the raw key printed by FoxBridge on first startup or by `foxbridge resetkey`. Never paste it into chat or commit it.
-6. Use `foxbridge tunnel status` and `foxbridge tunnel stop` to inspect or stop the tunnel.
+```sh
+npm install
+npx wrangler login
+npx wrangler deploy
+```
 
-The Quick Tunnel URL is temporary and can change after the Minecraft server restarts or the tunnel is restarted. Update the Worker secret when it changes. A named Cloudflare Tunnel with a stable hostname can be configured later if the user has a Cloudflare account and domain.
+The Wrangler configuration creates the `FOXBRIDGE_REGISTRY` Durable Object binding and its initial SQLite migration.
 
-The public tunnel URL does not replace FoxBridge authentication: every API request still requires the high-entropy Bearer API key. Keep that key private. Do **not** change FoxBridge to bind to `0.0.0.0` while TLS is disabled. The plugin only supports starting this helper when the API is bound to a loopback address and local TLS is disabled; Cloudflare provides HTTPS on the external side.
+After deployment, note the stable Worker hostname, for example:
 
-## FoxBridge API compatibility
+`https://foxbridge-mcp.<your-workers-subdomain>.workers.dev`
 
-This adapter currently expects these FoxBridge routes:
+The MCP endpoint is `/mcp`; the registration endpoint is `/register`.
 
-- `GET /v1/status`
-- `GET /v1/plugins`
-- `GET /v1/files?path=plugins|logs`
-- `GET /v1/read?path=...`
-- `GET /v1/logs/latest`
+## 2. Configure Worker secrets
 
-Before deployment, verify the exact API-key header name and response formats against the running FoxBridge build. The header is configurable; no key is stored in this repository.
+Create three independent secrets. Do not put them in source files or GitHub commits.
+
+```sh
+npx wrangler secret put MCP_ACCESS_TOKEN
+npx wrangler secret put FOXBRIDGE_API_KEY
+npx wrangler secret put FOXBRIDGE_REGISTRATION_TOKEN
+```
+
+- `MCP_ACCESS_TOKEN`: credential used by the ChatGPT MCP connection.
+- `FOXBRIDGE_API_KEY`: the FoxBridge API key printed once by the Minecraft console when the plugin first creates it. It is not the registration token.
+- `FOXBRIDGE_REGISTRATION_TOKEN`: a separate, randomly generated secret used only by the Minecraft plugin to publish its current tunnel URL.
+
+If the original FoxBridge API key was lost, use the Minecraft console command `foxbridge resetkey`, save the newly printed key securely, and update the Worker secret `FOXBRIDGE_API_KEY`. Resetting it invalidates the previous API key.
+
+## 3. Configure the Minecraft server
+
+Install FoxBridge 1.0.1 and start the server once so the plugin creates `plugins/FoxBridge/config.yml` and `plugins/FoxBridge/security.yml`. Stop the server before editing these files.
+
+In `plugins/FoxBridge/config.yml`, set:
+
+```yaml
+mcp:
+  registration_url: "https://foxbridge-mcp.<your-workers-subdomain>.workers.dev/register"
+  registration_interval_seconds: 45
+  auto_start_tunnel: true
+```
+
+In `plugins/FoxBridge/security.yml`, set `registration_token` to exactly the same value as the Worker secret `FOXBRIDGE_REGISTRATION_TOKEN`:
+
+```yaml
+registration_token: "YOUR_RANDOM_REGISTRATION_SECRET"
+```
+
+Keep the existing `key_hash` entry. Do not replace it with the raw API key. Restrict access to the plugin data folder and do not share either secret.
+
+Start Minecraft. If the registration URL and token are configured, FoxBridge automatically starts its Quick Tunnel after startup, sends the current HTTPS URL to `/register`, and refreshes the registration every 45 seconds.
+
+## 4. Verify the connection
+
+The Minecraft console should show:
+
+- FoxBridge 1.0.1 started.
+- Cloudflare Quick Tunnel started.
+- `FoxBridge-MCP: адрес туннеля зарегистрирован или обновлён.`
+
+The Worker rejects requests to the Minecraft API until a fresh registration exists. A registration becomes stale after 120 seconds without a heartbeat. When Minecraft restarts and receives a new Quick Tunnel URL, the plugin automatically replaces the stored URL.
+
+The stable MCP endpoint remains:
+
+`https://foxbridge-mcp.<your-workers-subdomain>.workers.dev/mcp`
+
+The MCP endpoint still requires `MCP_ACCESS_TOKEN`. Configure the ChatGPT connection using the authentication method supported by the ChatGPT plugin connection flow. Do not paste secrets into public files or chat.
+
+## Troubleshooting
+
+- **Worker returns 503 on /mcp:** check that the Worker secrets and Durable Object binding are configured, and that Minecraft has registered recently.
+- **Worker returns 401 on /register:** the plugin's `registration_token` does not match `FOXBRIDGE_REGISTRATION_TOKEN`.
+- **Worker returns 401 when calling the Minecraft API:** `FOXBRIDGE_API_KEY` does not match the key currently held by FoxBridge. If necessary, reset the key in the Minecraft console and update the Worker secret.
+- **No tunnel registration log:** verify that `registration_url` is HTTPS and ends in `/register`, and that outbound HTTPS is allowed by the Minecraft host.
+- **Tunnel starts but registration fails:** inspect the FoxBridge console log; the plugin never prints the registration token.
