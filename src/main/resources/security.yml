@@ -1,2 +1,5 @@
-# Generated automatically. Only the SHA-256 hash is stored.
+# Generated automatically. Only the SHA-256 hash of the FoxBridge API key is stored.
 key_hash: ""
+# Bearer token used only to register the changing Cloudflare Tunnel URL with FoxBridge-MCP.
+# Set the same value as the Cloudflare Worker secret FOXBRIDGE_REGISTRATION_TOKEN.
+registration_token: ""
