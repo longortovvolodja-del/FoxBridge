@@ -21,7 +21,7 @@ The gateway does **not** expose arbitrary console commands, arbitrary HTTP proxy
    npx wrangler secret put FOXBRIDGE_API_KEY
    npx wrangler secret put FOXBRIDGE_BASE_URL
    ```
-3. Set `FOXBRIDGE_API_KEY_HEADER` in `wrangler.toml` to the exact header FoxBridge expects.
+3. The gateway sends the FoxBridge key as `Authorization: Bearer <key>`.
 4. Run `npm run typecheck`, then `npm run deploy`.
 5. The MCP endpoint will be `https://<worker-name>.<account>.workers.dev/mcp`.
 
