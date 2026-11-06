@@ -368,7 +368,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             }
             try { Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
             catch (AtomicMoveNotSupportedException e) { Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING); }
-            Files.writeString(destination.resolveSibling("cloudflared.sha256"), actual + "  cloudflared\\n", StandardCharsets.UTF_8);
+            Files.writeString(destination.resolveSibling("cloudflared.sha256"), actual + "  cloudflared" + System.lineSeparator(), StandardCharsets.UTF_8);
             return tag == null ? "latest" : tag;
         } catch (Exception e) {
             Files.deleteIfExists(temp);
