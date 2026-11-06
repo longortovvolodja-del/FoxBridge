@@ -32,6 +32,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
     private volatile Process tunnelProcess;
     private volatile String tunnelUrl;
     private volatile Path tunnelLogFile;
+    private volatile String registrationToken = "";
 
     @Override public void onEnable() {
         saveDefaultConfig();
@@ -51,7 +52,12 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             return;
         }
         Objects.requireNonNull(getCommand("foxbridge")).setExecutor(this);
-        getLogger().info("FoxBridge 1.0.0 запущен.");
+        getLogger().info("FoxBridge 1.0.1 запущен.");
+        if (getConfig().getBoolean("mcp.auto_start_tunnel", true)
+                && !getConfig().getString("mcp.registration_url", "").isBlank()
+                && !registrationToken.isBlank()) {
+            Bukkit.getScheduler().runTaskLater(this, () -> startTunnel(Bukkit.getConsoleSender()), 40L);
+        }
     }
 
     @Override public void onDisable() {
@@ -63,6 +69,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         Path file = data.resolve("security.yml");
         if (!Files.exists(file)) saveResource("security.yml", false);
         var cfg = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(file.toFile());
+        registrationToken = cfg.getString("registration_token", "").trim();
         String hash = cfg.getString("key_hash", "");
         if (hash == null || hash.isBlank()) {
             String key = newKey();
@@ -406,7 +413,8 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
                     tunnelLogFile = logFile;
                     Process active = process;
                     sendDiagnostic(sender, "§aТуннель поднят и работает: §f" + url);
-                    sendDiagnostic(sender, "§eДля MCP укажи FOXBRIDGE_BASE_URL = этот HTTPS-адрес. Не публикуй API-ключ.");
+                    Process active = process;
+                    startTunnelRegistration(active, url);
                     Thread monitor = new Thread(() -> {
                         try {
                             int exit = active.waitFor();
@@ -478,6 +486,77 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         tunnelUrl = null;
         tunnelLogFile = null;
         if (process != null && process.isAlive()) process.destroyForcibly();
+    }
+
+
+    private void startTunnelRegistration(Process active, String url) {
+        Thread registrar = new Thread(() -> {
+            while (active.isAlive() && isEnabled()) {
+                try {
+                    if (registerTunnel(url)) {
+                        getLogger().info("FoxBridge-MCP: адрес туннеля зарегистрирован или обновлён.");
+                    } else {
+                        getLogger().warning("FoxBridge-MCP: регистрация не настроена. Проверьте mcp.registration_url и registration_token.");
+                    }
+                } catch (Exception e) {
+                    getLogger().warning("FoxBridge-MCP: не удалось обновить регистрацию туннеля: "
+                            + e.getClass().getSimpleName());
+                }
+                try {
+                    long interval = Math.max(15L, getConfig().getLong("mcp.registration_interval_seconds", 45L));
+                    Thread.sleep(TimeUnit.SECONDS.toMillis(interval));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }, "FoxBridge-MCP-Registration");
+        registrar.setDaemon(true);
+        registrar.start();
+    }
+
+    private boolean registerTunnel(String tunnelUrl) throws IOException {
+        String endpoint = getConfig().getString("mcp.registration_url", "").trim();
+        String token = registrationToken;
+        if (endpoint.isBlank() || token == null || token.isBlank()) return false;
+
+        URL target = new URL(endpoint);
+        if (!"https".equalsIgnoreCase(target.getProtocol()) || target.getUserInfo() != null
+                || target.getQuery() != null || target.getRef() != null
+                || !"/register".equals(target.getPath())) {
+            throw new IOException("mcp.registration_url должен быть HTTPS URL с путём /register.");
+        }
+        URL tunnel = new URL(tunnelUrl);
+        if (!"https".equalsIgnoreCase(tunnel.getProtocol())
+                || !tunnel.getHost().matches("(?i)[a-z0-9-]+\\.trycloudflare\\.com")) {
+            throw new IOException("Получен недопустимый адрес Cloudflare Quick Tunnel.");
+        }
+
+        HttpURLConnection connection = (HttpURLConnection) target.openConnection();
+        try {
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(8000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setRequestProperty("Accept", "application/json");
+            byte[] body = ("{\"tunnel_url\":\"" + tunnel.getProtocol() + "://" + tunnel.getHost() + "\"}")
+                    .getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(body.length);
+            try (OutputStream out = connection.getOutputStream()) { out.write(body); }
+            int status = connection.getResponseCode();
+            if (status >= 200 && status < 300) {
+                try (InputStream in = connection.getInputStream()) { in.readNBytes(4096); }
+                return true;
+            }
+            try (InputStream error = connection.getErrorStream()) {
+                if (error != null) error.readNBytes(4096);
+            }
+            throw new IOException("MCP registration returned HTTP " + status);
+        } finally {
+            connection.disconnect();
+        }
     }
 
     private String downloadOfficialCloudflared(Path destination) throws Exception {
