@@ -169,6 +169,11 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             sender.sendMessage("§c  Исполняемый файл Java не найден: " + javaBin);
         }
 
+        sender.sendMessage("§eПроверка исходящего HTTPS (Cloudflare)... §f" + testHttps("https://www.cloudflare.com/cdn-cgi/trace"));
+        sender.sendMessage("§eПроверка исходящего HTTPS (GitHub)... §f" + testHttps("https://github.com/"));
+
+        sender.sendMessage("§eПроверка кратковременного фонового процесса (8 секунд)... §f" + testLongRunningProcess());
+
         Path cloudflared = findExecutable("cloudflared");
         if (cloudflared == null) {
             sender.sendMessage("§eCloudflared: §cне найден в PATH");
@@ -183,6 +188,51 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         sender.sendMessage("§eTLS API: §f" + (getConfig().getBoolean("tls.enabled", false) ? "включён" : "выключен"));
         sender.sendMessage("§aДиагностика завершена. Настройки и сетевые порты не изменялись.");
         sender.sendMessage("§6==================================================");
+    }
+
+    private String testHttps(String address) {
+        HttpsURLConnection connection = null;
+        try {
+            URL url = new URL(address);
+            connection = (HttpsURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", "FoxBridge-Diagnostics/1.0");
+            int code = connection.getResponseCode();
+            return code >= 200 && code < 500
+                    ? "соединение установлено, HTTP " + code
+                    : "HTTPS доступен, но сервер ответил HTTP " + code;
+        } catch (Exception e) {
+            return "не удалось: " + e.getClass().getSimpleName() + ": " + e.getMessage();
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private String testLongRunningProcess() {
+        Process process = null;
+        try {
+            process = new ProcessBuilder("sh", "-c", "sleep 8")
+                    .redirectErrorStream(true)
+                    .start();
+            if (process.waitFor(2, TimeUnit.SECONDS)) {
+                return "процесс завершился раньше проверки (код " + process.exitValue() + ")";
+            }
+            boolean alive = process.isAlive();
+            process.destroyForcibly();
+            process.waitFor(2, TimeUnit.SECONDS);
+            return alive
+                    ? "успешно: дочерний процесс оставался активным 2 секунды; тестовый процесс остановлен"
+                    : "процесс неожиданно завершился до проверки";
+        } catch (SecurityException e) {
+            return "запуск запрещён политикой безопасности Java/хостинга";
+        } catch (Exception e) {
+            return "не удалось: " + e.getClass().getSimpleName() + ": " + e.getMessage();
+        } finally {
+            if (process != null && process.isAlive()) process.destroyForcibly();
+        }
     }
 
     private Path findExecutable(String name) {
