@@ -54,7 +54,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         String hash = cfg.getString("key_hash", "");
         if (hash == null || hash.isBlank()) {
             String key = newKey();
-            keyHash = sha(key);
+            keyHash = sha(key.getBytes(StandardCharsets.UTF_8));
             cfg.set("key_hash", HexFormat.of().formatHex(keyHash));
             cfg.save(file.toFile());
             getLogger().warning("FOXBRIDGE KEY (сохраните сейчас, повторно не показывается): " + key);
