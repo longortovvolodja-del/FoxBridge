@@ -30,7 +30,8 @@ async function foxbridgeGet(env: Env, route: string): Promise<string> {
   const url = new URL(route, base);
   if (url.origin !== base.origin) throw new Error("Invalid backend route");
 
-  const headerName = env.FOXBRIDGE_API_KEY_HEADER || "X-FoxBridge-Key";
+  const headerName = env.FOXBRIDGE_API_KEY_HEADER;
+  if (!headerName) throw new Error("FOXBRIDGE_API_KEY_HEADER is not configured");
   const response = await fetch(url, {
     method: "GET",
     headers: { [headerName]: env.FOXBRIDGE_API_KEY, "Accept": "application/json" },
