@@ -1,0 +1,15 @@
+name: FoxBridge
+version: 1.0.0
+main: ru.foxbridge.FoxBridgePlugin
+api-version: '1.18'
+author: FoxBridge
+description: Restricted authenticated bridge for Paper server diagnostics
+commands:
+  foxbridge:
+    description: FoxBridge administration
+    usage: /foxbridge <status|reload|resetkey|approve>
+    permission: foxbridge.admin
+permissions:
+  foxbridge.admin:
+    description: Allows FoxBridge administration
+    default: op
