@@ -11,11 +11,14 @@ import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.*;
 import java.security.KeyStore;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor {
     private HttpServer server;
@@ -24,6 +27,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
     private volatile byte[] keyHash;
     private final Map<String, Rate> rates = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicBoolean diagnosticRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicBoolean cloudflaredTestRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Override public void onEnable() {
         saveDefaultConfig();
@@ -139,6 +143,29 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             }
             return true;
         }
+        if (sub.equals("cloudflared")) {
+            if (!(sender instanceof ConsoleCommandSender)) {
+                sender.sendMessage("§c[FoxBridge] Проверка cloudflared доступна только из консоли сервера.");
+                return true;
+            }
+            if (!cloudflaredTestRunning.compareAndSet(false, true)) {
+                sender.sendMessage("§e[FoxBridge] Проверка cloudflared уже выполняется.");
+                return true;
+            }
+            try {
+                Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+                    try {
+                        checkCloudflared(sender);
+                    } finally {
+                        cloudflaredTestRunning.set(false);
+                    }
+                });
+            } catch (Exception e) {
+                cloudflaredTestRunning.set(false);
+                sender.sendMessage("§c[FoxBridge] Не удалось запустить проверку: " + e.getMessage());
+            }
+            return true;
+        }
         if (sub.equals("status")) {
             sender.sendMessage("§6[FoxBridge] §f" + (server == null ? "API остановлен" : "API работает"));
             return true;
@@ -208,6 +235,206 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         sendDiagnostic(sender, "§eTLS API: §f" + (tls ? "включён" : "выключен"));
         sendDiagnostic(sender, "§aДиагностика завершена. Настройки и сетевые порты не изменялись.");
         sendDiagnostic(sender, "§6==================================================");
+    }
+
+
+    /**
+     * Downloads the official Linux x86_64 cloudflared binary, verifies the SHA-256
+     * digest published by the official Cloudflare GitHub release API, then tests
+     * a temporary Quick Tunnel to the closed local port 1. No FoxBridge API port
+     * or listener setting is changed and the temporary process is always stopped.
+     */
+    private void checkCloudflared(CommandSender sender) {
+        sendDiagnostic(sender, "§6========== FoxBridge: проверка cloudflared ==========");
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
+        if (!os.contains("linux") || !(arch.equals("amd64") || arch.equals("x86_64"))) {
+            sendDiagnostic(sender, "§cАвтозагрузка поддерживается только на Linux amd64; обнаружено: " + os + " / " + arch);
+            sendDiagnostic(sender, "§6==================================================");
+            return;
+        }
+
+        Path toolDir = data.resolve("tools").normalize();
+        Path binary = toolDir.resolve("cloudflared").normalize();
+        Path logFile = toolDir.resolve("cloudflared-test.log").normalize();
+        Process process = null;
+        try {
+            Files.createDirectories(toolDir);
+            sendDiagnostic(sender, "§eПолучение официальной версии Cloudflare и SHA-256...");
+            String release = downloadOfficialCloudflared(binary);
+            sendDiagnostic(sender, "§aБинарник загружен и SHA-256 подтверждён. Версия релиза: §f" + release);
+
+            Files.deleteIfExists(logFile);
+            sendDiagnostic(sender, "§eЗапуск временного Quick Tunnel на 45 секунд...");
+            sendDiagnostic(sender, "§7Туннель направлен только на 127.0.0.1:1 (закрытый порт); FoxBridge API не публикуется.");
+            process = new ProcessBuilder(binary.toString(), "tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:1")
+                    .redirectErrorStream(true)
+                    .redirectOutput(logFile.toFile())
+                    .start();
+
+            boolean exited = process.waitFor(45, TimeUnit.SECONDS);
+            String output = readSmallLog(logFile);
+            if (!exited) {
+                boolean connected = output.contains("Registered tunnel connection");
+                process.destroy();
+                if (!process.waitFor(3, TimeUnit.SECONDS)) process.destroyForcibly();
+                if (connected) {
+                    sendDiagnostic(sender, "§aУспех: cloudflared установил соединение с сетью Cloudflare и работал 45 секунд.");
+                } else {
+                    sendDiagnostic(sender, "§eПроцесс cloudflared оставался активным 45 секунд, но подтверждение подключения к edge не найдено.");
+                    sendDiagnostic(sender, "§7Последние сообщения: " + safeLogSummary(output));
+                }
+                sendDiagnostic(sender, "§7Временный процесс остановлен.");
+            } else {
+                sendDiagnostic(sender, "§ccloudflared завершился раньше 45 секунд (код " + process.exitValue() + ").");
+                sendDiagnostic(sender, "§7Сообщения: " + safeLogSummary(output));
+            }
+        } catch (Exception e) {
+            sendDiagnostic(sender, "§cПроверка cloudflared не удалась: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroy();
+                try { if (!process.waitFor(3, TimeUnit.SECONDS)) process.destroyForcibly(); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); process.destroyForcibly(); }
+            }
+            try { Files.deleteIfExists(logFile); } catch (IOException ignored) {}
+            sendDiagnostic(sender, "§aПроверка завершена. Настройки FoxBridge API и сетевые порты не изменялись.");
+            sendDiagnostic(sender, "§6==================================================");
+        }
+    }
+
+    private String downloadOfficialCloudflared(Path destination) throws Exception {
+        URL api = new URL("https://api.github.com/repos/cloudflare/cloudflared/releases/latest");
+        HttpURLConnection meta = (HttpURLConnection) api.openConnection();
+        meta.setConnectTimeout(10000);
+        meta.setReadTimeout(15000);
+        meta.setRequestProperty("Accept", "application/vnd.github+json");
+        meta.setRequestProperty("User-Agent", "FoxBridge-Cloudflared-Installer/1.0");
+        String json;
+        try {
+            int code = meta.getResponseCode();
+            if (code != 200) throw new IOException("GitHub Releases API ответил HTTP " + code);
+            try (InputStream in = meta.getInputStream()) { json = new String(readBounded(in, 2 * 1024 * 1024), StandardCharsets.UTF_8); }
+        } finally { meta.disconnect(); }
+
+        String asset = jsonObjectContaining(json, "\"name\"\\s*:\\s*\"cloudflared-linux-amd64\"");
+        if (asset == null) throw new IOException("Официальный релиз не содержит cloudflared-linux-amd64.");
+        String downloadUrl = jsonString(asset, "browser_download_url");
+        String digest = jsonString(asset, "digest");
+        String tag = jsonString(jsonObjectContaining(json, "\"tag_name\"\\s*:"), "tag_name");
+        long expectedSize = jsonLong(asset, "size");
+        if (downloadUrl == null || !downloadUrl.startsWith("https://github.com/cloudflare/cloudflared/releases/download/")
+                || !downloadUrl.endsWith("/cloudflared-linux-amd64")) throw new IOException("Недопустимый адрес официального бинарника.");
+        if (digest == null || !digest.matches("sha256:[0-9a-fA-F]{64}")) throw new IOException("В GitHub Release отсутствует SHA-256 digest.");
+        if (expectedSize < 1024 * 1024 || expectedSize > 50L * 1024 * 1024) throw new IOException("Размер бинарника вне безопасного диапазона.");
+
+        Path temp = destination.resolveSibling("cloudflared.download");
+        Files.deleteIfExists(temp);
+        HttpURLConnection download = (HttpURLConnection) new URL(downloadUrl).openConnection();
+        download.setConnectTimeout(15000);
+        download.setReadTimeout(30000);
+        download.setInstanceFollowRedirects(true);
+        download.setRequestProperty("User-Agent", "FoxBridge-Cloudflared-Installer/1.0");
+        try {
+            int code = download.getResponseCode();
+            if (code != 200) throw new IOException("Скачивание завершилось с HTTP " + code);
+            String host = download.getURL().getHost().toLowerCase(Locale.ROOT);
+            if (!(host.equals("github.com") || host.equals("release-assets.githubusercontent.com")
+                    || host.equals("objects.githubusercontent.com"))) throw new IOException("Неожиданный хост перенаправления: " + host);
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            long count = 0;
+            try (InputStream in = download.getInputStream();
+                 OutputStream out = Files.newOutputStream(temp, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+                byte[] buffer = new byte[16384];
+                int n;
+                while ((n = in.read(buffer)) != -1) {
+                    count += n;
+                    if (count > expectedSize || count > 50L * 1024 * 1024) throw new IOException("Файл превышает ожидаемый размер.");
+                    sha256.update(buffer, 0, n);
+                    out.write(buffer, 0, n);
+                }
+            }
+            if (count != expectedSize) throw new IOException("Размер скачанного файла не совпадает с GitHub Release.");
+            String actual = HexFormat.of().formatHex(sha256.digest());
+            String expected = digest.substring("sha256:".length()).toLowerCase(Locale.ROOT);
+            if (!MessageDigest.isEqual(actual.getBytes(StandardCharsets.US_ASCII), expected.getBytes(StandardCharsets.US_ASCII))) {
+                throw new IOException("SHA-256 не совпал с опубликованным GitHub digest; бинарник удалён.");
+            }
+            try {
+                Files.setPosixFilePermissions(temp, EnumSet.of(PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE));
+            } catch (UnsupportedOperationException e) {
+                if (!temp.toFile().setExecutable(true, true)) throw new IOException("Не удалось сделать бинарник исполняемым.");
+            }
+            try { Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
+            catch (AtomicMoveNotSupportedException e) { Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING); }
+            Files.writeString(destination.resolveSibling("cloudflared.sha256"), actual + "  cloudflared\\n", StandardCharsets.UTF_8);
+            return tag == null ? "latest" : tag;
+        } catch (Exception e) {
+            Files.deleteIfExists(temp);
+            throw e;
+        } finally { download.disconnect(); }
+    }
+
+    private static byte[] readBounded(InputStream in, int max) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int n;
+        while ((n = in.read(buffer)) != -1) {
+            if (out.size() + n > max) throw new IOException("Ответ GitHub API слишком большой.");
+            out.write(buffer, 0, n);
+        }
+        return out.toByteArray();
+    }
+
+    private static String jsonObjectContaining(String json, String keyPattern) {
+        Matcher m = Pattern.compile(keyPattern).matcher(json);
+        if (!m.find()) return null;
+        int start = json.lastIndexOf('{', m.start());
+        if (start < 0) return null;
+        boolean quoted = false, escaped = false;
+        int depth = 0;
+        for (int i = start; i < json.length(); i++) {
+            char ch = json.charAt(i);
+            if (quoted) {
+                if (escaped) escaped = false;
+                else if (ch == '\\\\') escaped = true;
+                else if (ch == '"') quoted = false;
+            } else {
+                if (ch == '"') quoted = true;
+                else if (ch == '{') depth++;
+                else if (ch == '}' && --depth == 0) return json.substring(start, i + 1);
+            }
+        }
+        return null;
+    }
+
+    private static String jsonString(String json, String key) {
+        if (json == null) return null;
+        Matcher m = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"").matcher(json);
+        return m.find() ? m.group(1) : null;
+    }
+
+    private static long jsonLong(String json, String key) {
+        if (json == null) return -1;
+        Matcher m = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*(\\d+)").matcher(json);
+        return m.find() ? Long.parseLong(m.group(1)) : -1;
+    }
+
+    private static String readSmallLog(Path file) {
+        try {
+            if (!Files.isRegularFile(file)) return "";
+            byte[] bytes = Files.readAllBytes(file);
+            int start = Math.max(0, bytes.length - 12000);
+            return new String(bytes, start, bytes.length - start, StandardCharsets.UTF_8);
+        } catch (IOException e) { return ""; }
+    }
+
+    private static String safeLogSummary(String log) {
+        if (log == null || log.isBlank()) return "нет вывода";
+        String cleaned = log.replaceAll("https?://\\S+", "[ссылка скрыта]")
+                .replaceAll("[\\r\\n]+", " ").trim();
+        return cleaned.length() > 300 ? cleaned.substring(cleaned.length() - 300) : cleaned;
     }
 
     private void sendDiagnostic(CommandSender sender, String message) {
