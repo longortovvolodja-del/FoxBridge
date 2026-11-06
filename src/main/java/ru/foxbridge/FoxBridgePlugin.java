@@ -265,9 +265,10 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             sendDiagnostic(sender, "§aБинарник загружен и SHA-256 подтверждён. Версия релиза: §f" + release);
 
             Files.deleteIfExists(logFile);
-            sendDiagnostic(sender, "§eЗапуск временного Quick Tunnel на 45 секунд...");
+            sendDiagnostic(sender, "§eПроверка соединения с Cloudflare Edge по HTTP/2 (TCP 7844), 45 секунд...");
             sendDiagnostic(sender, "§7Туннель направлен только на 127.0.0.1:1 (закрытый порт); FoxBridge API не публикуется.");
-            process = new ProcessBuilder(binary.toString(), "tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:1")
+            sendDiagnostic(sender, "§7HTTP/2 выбран отдельно, чтобы проверить TCP 7844 без зависимости от UDP/QUIC.");
+            process = new ProcessBuilder(binary.toString(), "tunnel", "--no-autoupdate", "--protocol", "http2", "--url", "http://127.0.0.1:1")
                     .redirectErrorStream(true)
                     .redirectOutput(logFile.toFile())
                     .start();
