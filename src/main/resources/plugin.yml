@@ -7,7 +7,7 @@ description: Restricted authenticated bridge for Paper server diagnostics
 commands:
   foxbridge:
     description: FoxBridge administration
-    usage: /foxbridge <status|reload|resetkey|approve>
+    usage: /foxbridge <status|diagnose|reload|resetkey|approve>
     permission: foxbridge.admin
 permissions:
   foxbridge.admin:
