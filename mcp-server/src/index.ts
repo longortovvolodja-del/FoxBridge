@@ -23,9 +23,6 @@ function isAllowedFilePath(path: string): boolean {
 }
 
 async function foxbridgeGet(env: Env, route: string): Promise<string> {
-  if (!env.FOXBRIDGE_BASE_URL || !env.FOXBRIDGE_API_KEY || !env.FOXBRIDGE_ACCESS_TOKEN) {
-    // The token is checked by the outer Worker; this guard prevents incomplete backend configuration.
-  }
   const base = new URL(env.FOXBRIDGE_BASE_URL);
   if (base.protocol !== "https:") {
     throw new Error("FoxBridge backend must use HTTPS");
@@ -109,12 +106,6 @@ function makeServer(env: Env) {
 
   return server;
 }
-
-const mcpHandler = createMcpHandler((_extra) => {
-  // The server factory is request-scoped by the Agents SDK. The environment is
-  // attached in fetch() below through a small per-request handler instead.
-  throw new Error("Use the request-scoped handler");
-});
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
