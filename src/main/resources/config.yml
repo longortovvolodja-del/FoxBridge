@@ -1,4 +1,4 @@
-# FoxBridge 1.0.0
+# FoxBridge 1.0.1
 # Secure default: local access only. Remote access requires TLS.
 server:
   bind_address: "127.0.0.1"
@@ -17,3 +17,11 @@ tls:
   enabled: false
   keystore: "foxbridge.p12"
   password: "CHANGE_THIS"
+mcp:
+  # Постоянный адрес Cloudflare Worker, обязательно с путём /register.
+  # Пример: https://foxbridge-mcp.<account>.workers.dev/register
+  registration_url: ""
+  # Повторная регистрация адреса туннеля (секунды).
+  registration_interval_seconds: 45
+  # Автозапуск Quick Tunnel после старта Minecraft, если регистрация настроена.
+  auto_start_tunnel: true
