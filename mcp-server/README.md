@@ -27,11 +27,22 @@ The gateway does **not** expose arbitrary console commands, arbitrary HTTP proxy
 
 Never commit secrets to GitHub or paste them into chat.
 
-## Network requirement — not configured yet
+## Network connection through FoxBridge
 
-Cloudflare Workers cannot reach the Minecraft plugin at `127.0.0.1` on the game host. The FoxBridge API must be made reachable over HTTPS through a secure tunnel or a properly secured public listener before this gateway can connect.
+The recommended initial route is a Cloudflare Quick Tunnel started by the FoxBridge plugin. The plugin keeps the API bound to loopback (normally `127.0.0.1:25965`); cloudflared creates an outbound HTTPS tunnel to that local API.
 
-Do **not** change FoxBridge to bind to `0.0.0.0` while TLS is disabled. First choose and verify a secure network route supported by the hoster.
+On the Minecraft server console:
+
+1. Run `foxbridge cloudflared` once to download the official Linux amd64 binary and verify its SHA-256.
+2. Run `foxbridge tunnel start`.
+3. Copy the generated `https://….trycloudflare.com` URL from the console.
+4. Set the Cloudflare Worker secret `FOXBRIDGE_BASE_URL` to that URL (without a path).
+5. Keep `FOXBRIDGE_API_KEY` as the raw key printed by FoxBridge on first startup or by `foxbridge resetkey`. Never paste it into chat or commit it.
+6. Use `foxbridge tunnel status` and `foxbridge tunnel stop` to inspect or stop the tunnel.
+
+The Quick Tunnel URL is temporary and can change after the Minecraft server restarts or the tunnel is restarted. Update the Worker secret when it changes. A named Cloudflare Tunnel with a stable hostname can be configured later if the user has a Cloudflare account and domain.
+
+The public tunnel URL does not replace FoxBridge authentication: every API request still requires the high-entropy Bearer API key. Keep that key private. Do **not** change FoxBridge to bind to `0.0.0.0` while TLS is disabled. The plugin only supports starting this helper when the API is bound to a loopback address and local TLS is disabled; Cloudflare provides HTTPS on the external side.
 
 ## FoxBridge API compatibility
 
