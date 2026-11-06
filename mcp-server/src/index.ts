@@ -32,7 +32,7 @@ function textResult(text: string, isError = false) {
 }
 
 function isAllowedFilePath(path: string): boolean {
-  if (!path || path.length > 240 || path.includes("\\\\") || path.includes("\\0")) return false;
+  if (!path || path.length > 240 || path.includes("\\") || path.includes("\0")) return false;
   if (path.split("/").some((part) => part === ".." || part === "." || part === "")) return false;
   return path.startsWith("plugins/") || path.startsWith("logs/");
 }
