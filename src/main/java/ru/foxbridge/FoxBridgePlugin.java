@@ -28,6 +28,10 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
     private final Map<String, Rate> rates = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicBoolean diagnosticRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicBoolean cloudflaredTestRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicBoolean tunnelStarting = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private volatile Process tunnelProcess;
+    private volatile String tunnelUrl;
+    private volatile Path tunnelLogFile;
 
     @Override public void onEnable() {
         saveDefaultConfig();
@@ -50,7 +54,10 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         getLogger().info("FoxBridge 1.0.0 запущен.");
     }
 
-    @Override public void onDisable() { stopServer(); }
+    @Override public void onDisable() {
+        stopTunnelImmediately();
+        stopServer();
+    }
 
     private void loadKey() throws Exception {
         Path file = data.resolve("security.yml");
@@ -166,6 +173,30 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             }
             return true;
         }
+        if (sub.equals("tunnel")) {
+            if (!(sender instanceof ConsoleCommandSender)) {
+                sender.sendMessage("§c[FoxBridge] Управление туннелем доступно только из консоли сервера.");
+                return true;
+            }
+            String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
+            if (action.equals("start")) {
+                startTunnel(sender);
+            } else if (action.equals("stop")) {
+                stopTunnel(sender);
+            } else if (action.equals("status")) {
+                Process current = tunnelProcess;
+                if (current != null && current.isAlive() && tunnelUrl != null) {
+                    sender.sendMessage("§a[FoxBridge] Защищённый API-туннель работает: §f" + tunnelUrl);
+                } else if (tunnelStarting.get()) {
+                    sender.sendMessage("§e[FoxBridge] Туннель запускается, ожидаем адрес Cloudflare...");
+                } else {
+                    sender.sendMessage("§7[FoxBridge] Постоянный туннель сейчас остановлен.");
+                }
+            } else {
+                sender.sendMessage("§eИспользование: foxbridge tunnel <start|stop|status>");
+            }
+            return true;
+        }
         if (sub.equals("status")) {
             sender.sendMessage("§6[FoxBridge] §f" + (server == null ? "API остановлен" : "API работает"));
             return true;
@@ -199,7 +230,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             } catch (Exception e) { sender.sendMessage("§cОшибка: " + e.getMessage()); }
             return true;
         }
-        sender.sendMessage("§eИспользование: /foxbridge <status|diagnose|diag|cloudflared|reload|resetkey|approve>");
+        sender.sendMessage("§eИспользование: /foxbridge <status|diagnose|diag|cloudflared|tunnel|reload|resetkey|approve>");
         return true;
     }
 
@@ -302,6 +333,141 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
             sendDiagnostic(sender, "§aПроверка завершена. Настройки FoxBridge API и сетевые порты не изменялись.");
             sendDiagnostic(sender, "§6==================================================");
         }
+    }
+
+    /**
+     * Starts a persistent Cloudflare Quick Tunnel to the loopback-only FoxBridge API.
+     * The API remains bound to localhost and still requires its Bearer API key.
+     */
+    private void startTunnel(CommandSender sender) {
+        if (server == null) {
+            sender.sendMessage("§c[FoxBridge] Сначала должен работать локальный API.");
+            return;
+        }
+        Process current = tunnelProcess;
+        if (current != null && current.isAlive() && tunnelUrl != null) {
+            sender.sendMessage("§a[FoxBridge] Туннель уже работает: §f" + tunnelUrl);
+            return;
+        }
+        if (!tunnelStarting.compareAndSet(false, true)) {
+            sender.sendMessage("§e[FoxBridge] Туннель уже запускается.");
+            return;
+        }
+        try {
+            Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+                Process process = null;
+                Path logFile = data.resolve("tools").resolve("cloudflared-tunnel.log");
+                try {
+                    String bind = getConfig().getString("server.bind_address", "127.0.0.1");
+                    int port = getConfig().getInt("server.port", 25965);
+                    boolean tls = getConfig().getBoolean("tls.enabled", false);
+                    InetAddress address = InetAddress.getByName(bind);
+                    if (!address.isLoopbackAddress() || tls) {
+                        sendDiagnostic(sender, "§c[FoxBridge] Quick Tunnel поддерживает только текущую безопасную схему: loopback bind и локальный HTTP без TLS.");
+                        return;
+                    }
+                    Path binary = data.resolve("tools").resolve("cloudflared");
+                    Files.createDirectories(binary.getParent());
+                    if (!Files.isRegularFile(binary) || !Files.isExecutable(binary)) {
+                        sendDiagnostic(sender, "§eОфициальный cloudflared отсутствует; скачиваю и проверяю SHA-256...");
+                        String release = downloadOfficialCloudflared(binary);
+                        sendDiagnostic(sender, "§acloudflared установлен, SHA-256 подтверждён: §f" + release);
+                    }
+                    Files.deleteIfExists(logFile);
+                    String originHost = address.getHostAddress();
+                    if (originHost.contains(":")) originHost = "[" + originHost + "]";
+                    String origin = "http://" + originHost + ":" + port;
+                    sendDiagnostic(sender, "§eЗапускаю постоянный Quick Tunnel к локальному FoxBridge API...");
+                    sendDiagnostic(sender, "§7Внешний адрес будет HTTPS; локальный API останется на " + origin + " и потребует Bearer-ключ.");
+                    process = new ProcessBuilder(binary.toString(), "tunnel", "--no-autoupdate",
+                            "--protocol", "http2", "--url", origin)
+                            .redirectErrorStream(true)
+                            .redirectOutput(logFile.toFile())
+                            .start();
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
+                    String url = null;
+                    while (System.nanoTime() < deadline && process.isAlive()) {
+                        String output = readSmallLog(logFile);
+                        Matcher matcher = Pattern.compile("https://[a-zA-Z0-9-]+\\.trycloudflare\\.com").matcher(output);
+                        if (matcher.find()) { url = matcher.group(); break; }
+                        Thread.sleep(500);
+                    }
+                    if (url == null || !process.isAlive()) {
+                        String output = readSmallLog(logFile);
+                        throw new IOException("Cloudflare URL не получен за 45 секунд. " + safeLogSummary(output));
+                    }
+                    tunnelProcess = process;
+                    tunnelUrl = url;
+                    tunnelLogFile = logFile;
+                    Process active = process;
+                    sendDiagnostic(sender, "§aТуннель поднят и работает: §f" + url);
+                    sendDiagnostic(sender, "§eДля MCP укажи FOXBRIDGE_BASE_URL = этот HTTPS-адрес. Не публикуй API-ключ.");
+                    Thread monitor = new Thread(() -> {
+                        try {
+                            int exit = active.waitFor();
+                            if (tunnelProcess == active) {
+                                tunnelProcess = null;
+                                tunnelUrl = null;
+                                tunnelLogFile = null;
+                                getLogger().warning("Cloudflare Quick Tunnel завершился (код " + exit + ").");
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }, "FoxBridge-Tunnel-Monitor");
+                    monitor.setDaemon(true);
+                    monitor.start();
+                    process = null; // Ownership transferred to tunnelProcess/monitor.
+                } catch (Exception e) {
+                    sendDiagnostic(sender, "§c[FoxBridge] Не удалось запустить туннель: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                } finally {
+                    if (process != null && process.isAlive()) {
+                        process.destroy();
+                        try { if (!process.waitFor(3, TimeUnit.SECONDS)) process.destroyForcibly(); }
+                        catch (InterruptedException e) { Thread.currentThread().interrupt(); process.destroyForcibly(); }
+                    }
+                    tunnelStarting.set(false);
+                }
+            });
+        } catch (Exception e) {
+            tunnelStarting.set(false);
+            sender.sendMessage("§c[FoxBridge] Не удалось запланировать запуск туннеля: " + e.getMessage());
+        }
+    }
+
+    private void stopTunnel(CommandSender sender) {
+        Process process = tunnelProcess;
+        if (process == null || !process.isAlive()) {
+            sender.sendMessage("§7[FoxBridge] Туннель уже остановлен.");
+            return;
+        }
+        tunnelProcess = null;
+        tunnelUrl = null;
+        tunnelLogFile = null;
+        try {
+            Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+                process.destroy();
+                try {
+                    if (!process.waitFor(5, TimeUnit.SECONDS)) process.destroyForcibly();
+                    sendDiagnostic(sender, "§a[FoxBridge] Туннель остановлен.");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    process.destroyForcibly();
+                    sendDiagnostic(sender, "§e[FoxBridge] Процесс туннеля принудительно остановлен.");
+                }
+            });
+        } catch (Exception e) {
+            process.destroyForcibly();
+            sender.sendMessage("§e[FoxBridge] Процесс туннеля остановлен принудительно.");
+        }
+    }
+
+    private void stopTunnelImmediately() {
+        Process process = tunnelProcess;
+        tunnelProcess = null;
+        tunnelUrl = null;
+        tunnelLogFile = null;
+        if (process != null && process.isAlive()) process.destroyForcibly();
     }
 
     private String downloadOfficialCloudflared(Path destination) throws Exception {
