@@ -15,6 +15,14 @@ function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
 }
 
+function textResult(text: string, isError = false) {
+  return {
+    resultType: "complete" as const,
+    ...(isError ? { isError: true as const } : {}),
+    content: [{ type: "text" as const, text }]
+  };
+}
+
 function isAllowedFilePath(path: string): boolean {
   if (!path || path.length > 240 || path.includes("\\") || path.includes("\0")) return false;
   if (path.split("/").some((part) => part === ".." || part === "." || part === "")) return false;
@@ -31,7 +39,10 @@ async function foxbridgeGet(env: Env, route: string): Promise<string> {
 
   const response = await fetch(url, {
     method: "GET",
-    headers: { "Authorization": `Bearer ${env.FOXBRIDGE_API_KEY}`, "Accept": "application/json" },
+    headers: {
+      "Authorization": `Bearer ${env.FOXBRIDGE_API_KEY}`,
+      "Accept": "application/json"
+    },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   });
 
@@ -53,52 +64,62 @@ function makeServer(env: Env) {
 
   server.registerTool(
     "foxbridge_status",
-    { description: "Получить состояние Minecraft-сервера через FoxBridge.", inputSchema: {} },
-    async () => ({
-      content: [{ type: "text", text: await foxbridgeGet(env, "/v1/status") }]
-    })
+    {
+      description: "Получить состояние Minecraft-сервера через FoxBridge.",
+      inputSchema: z.object({})
+    },
+    async () => textResult(await foxbridgeGet(env, "/v1/status"))
   );
 
   server.registerTool(
     "foxbridge_list_plugins",
-    { description: "Получить список установленных плагинов Minecraft.", inputSchema: {} },
-    async () => ({
-      content: [{ type: "text", text: await foxbridgeGet(env, "/v1/plugins") }]
-    })
+    {
+      description: "Получить список установленных плагинов Minecraft.",
+      inputSchema: z.object({})
+    },
+    async () => textResult(await foxbridgeGet(env, "/v1/plugins"))
   );
 
   server.registerTool(
     "foxbridge_latest_logs",
-    { description: "Прочитать последние строки серверного лога.", inputSchema: {} },
-    async () => ({
-      content: [{ type: "text", text: await foxbridgeGet(env, "/v1/logs/latest") }]
-    })
+    {
+      description: "Прочитать последние строки серверного лога.",
+      inputSchema: z.object({})
+    },
+    async () => textResult(await foxbridgeGet(env, "/v1/logs/latest"))
   );
 
   server.registerTool(
     "foxbridge_list_files",
     {
       description: "Посмотреть список файлов только в разрешённых каталогах plugins/ или logs/.",
-      inputSchema: { path: z.enum(["plugins", "logs"]).default("plugins") }
+      inputSchema: z.object({
+        path: z.enum(["plugins", "logs"]).default("plugins")
+      })
     },
-    async ({ path }) => ({
-      content: [{ type: "text", text: await foxbridgeGet(env, `/v1/files?path=${encodeURIComponent(path)}`) }]
-    })
+    async ({ path }) => textResult(
+      await foxbridgeGet(env, `/v1/files?path=${encodeURIComponent(path)}`)
+    )
   );
 
   server.registerTool(
     "foxbridge_read_file",
     {
       description: "Прочитать файл только внутри plugins/ или logs/. Нельзя читать другие каталоги.",
-      inputSchema: { path: z.string().min(1).max(240) }
+      inputSchema: z.object({
+        path: z.string().min(1).max(240)
+      })
     },
     async ({ path }) => {
       if (!isAllowedFilePath(path)) {
-        return { isError: true, content: [{ type: "text", text: "Доступ разрешён только к файлам внутри plugins/ и logs/." }] };
+        return textResult(
+          "Доступ разрешён только к файлам внутри plugins/ и logs/.",
+          true
+        );
       }
-      return {
-        content: [{ type: "text", text: await foxbridgeGet(env, `/v1/read?path=${encodeURIComponent(path)}`) }]
-      };
+      return textResult(
+        await foxbridgeGet(env, `/v1/read?path=${encodeURIComponent(path)}`)
+      );
     }
   );
 
