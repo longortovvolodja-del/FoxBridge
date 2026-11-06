@@ -24,6 +24,20 @@ The Worker has a stable HTTPS address. The Minecraft server's Cloudflare Quick T
 
 There is no static `FOXBRIDGE_BASE_URL` secret and no need to manually copy a new Quick Tunnel URL after a restart.
 
+## Deploy from GitHub Actions (recommended for this repository)
+
+A manual workflow is available at **Actions → Deploy FoxBridge-MCP → Run workflow**. Before running it, add these repository Actions secrets under **Settings → Secrets and variables → Actions**:
+
+- `CLOUDFLARE_API_TOKEN` — an account API token for deploying Workers. Cloudflare documents the **Edit Cloudflare Workers** token template for GitHub Actions deployments.
+- `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID.
+- `MCP_ACCESS_TOKEN` — a new random secret for the future ChatGPT MCP connection.
+- `FOXBRIDGE_API_KEY` — the current raw FoxBridge API key printed by the Minecraft console.
+- `FOXBRIDGE_REGISTRATION_TOKEN` — a separate new random secret for tunnel registration.
+
+The workflow installs dependencies, typechecks the MCP source, deploys the Worker and Durable Object, and writes the three runtime secrets to Cloudflare. It does not expose their values in the logs.
+
+For the Cloudflare token, use the Account API Tokens page and the **Edit Cloudflare Workers** template, scoped to the account that will host the Worker. Cloudflare's current GitHub Actions guide requires both the API token and account ID for non-interactive deployment.
+
 ## 1. Deploy to Cloudflare Workers
 
 Requirements: Node.js 22+, npm, and a Cloudflare account with Workers and Durable Objects enabled.
