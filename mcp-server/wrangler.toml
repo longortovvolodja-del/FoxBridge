@@ -1,0 +1,15 @@
+name = "foxbridge-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-11-06"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+FOXBRIDGE_API_KEY_HEADER = "X-FoxBridge-Key"
+
+# Set secrets with:
+# npx wrangler secret put MCP_ACCESS_TOKEN
+# npx wrangler secret put FOXBRIDGE_API_KEY
+# npx wrangler secret put FOXBRIDGE_BASE_URL
+#
+# FOXBRIDGE_BASE_URL must be an HTTPS address reachable from Cloudflare Workers.
+# Do not point it at 127.0.0.1 or a private panel address.
