@@ -110,6 +110,14 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
 
     @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "status" : args[0].toLowerCase(Locale.ROOT);
+        if (sub.equals("diagnose") || sub.equals("diag")) {
+            if (!(sender instanceof ConsoleCommandSender)) {
+                sender.sendMessage("§c[FoxBridge] Диагностика доступна только из консоли сервера.");
+                return true;
+            }
+            diagnose(sender);
+            return true;
+        }
         if (sub.equals("status")) {
             sender.sendMessage("§6[FoxBridge] §f" + (server == null ? "API остановлен" : "API работает"));
             return true;
@@ -145,6 +153,69 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         }
         sender.sendMessage("§eИспользование: /foxbridge <status|reload|resetkey|approve>");
         return true;
+    }
+
+    private void diagnose(CommandSender sender) {
+        sender.sendMessage("§6========== FoxBridge: диагностика хостинга ==========");
+        sender.sendMessage("§eJava: §f" + System.getProperty("java.version"));
+        sender.sendMessage("§eОС: §f" + System.getProperty("os.name") + " / " + System.getProperty("os.arch"));
+        sender.sendMessage("§eПапка сервера: §f" + Paths.get("").toAbsolutePath().normalize());
+        sender.sendMessage("§eПроверка запуска дочернего процесса Java...");
+        Path javaBin = Paths.get(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java");
+        if (Files.isRegularFile(javaBin)) {
+            sender.sendMessage("§7  " + runDiagnosticProcess(javaBin, "-version"));
+        } else {
+            sender.sendMessage("§c  Исполняемый файл Java не найден: " + javaBin);
+        }
+
+        Path cloudflared = findExecutable("cloudflared");
+        if (cloudflared == null) {
+            sender.sendMessage("§eCloudflared: §cне найден в PATH");
+            sender.sendMessage("§7  Программа может быть просто не установлена — это не доказывает запрет хостинга.");
+        } else {
+            sender.sendMessage("§eCloudflared: §aнайден §f" + cloudflared);
+            sender.sendMessage("§7  " + runDiagnosticProcess(cloudflared, "--version"));
+        }
+
+        sender.sendMessage("§eFoxBridge API bind: §f" + getConfig().getString("server.bind_address", "127.0.0.1")
+                + ":" + getConfig().getInt("server.port", 25965));
+        sender.sendMessage("§eTLS API: §f" + (getConfig().getBoolean("tls.enabled", false) ? "включён" : "выключен"));
+        sender.sendMessage("§aДиагностика завершена. Настройки и сетевые порты не изменялись.");
+        sender.sendMessage("§6==================================================");
+    }
+
+    private Path findExecutable(String name) {
+        String path = System.getenv("PATH");
+        if (path == null || path.isBlank()) return null;
+        boolean windows = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win");
+        for (String dir : path.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+            if (dir.isBlank()) continue;
+            Path candidate = Paths.get(dir).resolve(windows ? name + ".exe" : name).normalize();
+            if (Files.isRegularFile(candidate) && (windows || Files.isExecutable(candidate))) return candidate;
+        }
+        return null;
+    }
+
+    private String runDiagnosticProcess(Path executable, String... args) {
+        List<String> command = new ArrayList<>();
+        command.add(executable.toString());
+        command.addAll(Arrays.asList(args));
+        try {
+            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return "не завершился за 5 секунд (остановлен)";
+            }
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            if (output.length() > 240) output = output.substring(0, 240) + "...";
+            return "запуск успешен, код " + process.exitValue()
+                    + (output.isBlank() ? "" : "; " + output.replace("\n", " "));
+        } catch (SecurityException e) {
+            return "запуск запрещён политикой безопасности Java/хостинга";
+        } catch (Exception e) {
+            return "не удалось запустить: " + e.getClass().getSimpleName() + ": " + e.getMessage();
+        }
     }
 
     private boolean deny(CommandSender s) { s.sendMessage("§cНедостаточно прав."); return true; }
