@@ -413,7 +413,6 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
                     tunnelLogFile = logFile;
                     Process active = process;
                     sendDiagnostic(sender, "§aТуннель поднят и работает: §f" + url);
-                    Process active = process;
                     startTunnelRegistration(active, url);
                     Thread monitor = new Thread(() -> {
                         try {
