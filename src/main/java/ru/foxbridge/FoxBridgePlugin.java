@@ -113,7 +113,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
         String sub = args.length == 0 ? "status" : args[0].toLowerCase(Locale.ROOT);
         if (sub.equals("diagnose") || sub.equals("diag")) {
             if (!(sender instanceof ConsoleCommandSender)) {
-                sendDiagnostic(sender, "§c[FoxBridge] Диагностика доступна только из консоли сервера.");
+                sender.sendMessage("§c[FoxBridge] Диагностика доступна только из консоли сервера.");
                 return true;
             }
             if (!diagnosticRunning.compareAndSet(false, true)) {
@@ -177,38 +177,37 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
     }
 
     private void diagnose(CommandSender sender, String bind, int port, boolean tls) {
-        sender.sendMessage("§6========== FoxBridge: диагностика хостинга ==========");
-        sender.sendMessage("§eJava: §f" + System.getProperty("java.version"));
-        sender.sendMessage("§eОС: §f" + System.getProperty("os.name") + " / " + System.getProperty("os.arch"));
-        sender.sendMessage("§eПапка сервера: §f" + Paths.get("").toAbsolutePath().normalize());
-        sender.sendMessage("§eПроверка запуска дочернего процесса Java...");
+        sendDiagnostic(sender, "§6========== FoxBridge: диагностика хостинга ==========");
+        sendDiagnostic(sender, "§eJava: §f" + System.getProperty("java.version"));
+        sendDiagnostic(sender, "§eОС: §f" + System.getProperty("os.name") + " / " + System.getProperty("os.arch"));
+        sendDiagnostic(sender, "§eПапка сервера: §f" + Paths.get("").toAbsolutePath().normalize());
+        sendDiagnostic(sender, "§eПроверка запуска дочернего процесса Java...");
         Path javaBin = Paths.get(System.getProperty("java.home"), "bin",
                 System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java");
         if (Files.isRegularFile(javaBin)) {
-            sender.sendMessage("§7  " + runDiagnosticProcess(javaBin, "-version"));
+            sendDiagnostic(sender, "§7  " + runDiagnosticProcess(javaBin, "-version"));
         } else {
-            sender.sendMessage("§c  Исполняемый файл Java не найден: " + javaBin);
+            sendDiagnostic(sender, "§c  Исполняемый файл Java не найден: " + javaBin);
         }
 
-        sender.sendMessage("§eПроверка исходящего HTTPS (Cloudflare)... §f" + testHttps("https://www.cloudflare.com/cdn-cgi/trace"));
-        sender.sendMessage("§eПроверка исходящего HTTPS (GitHub)... §f" + testHttps("https://github.com/"));
+        sendDiagnostic(sender, "§eПроверка исходящего HTTPS (Cloudflare)... §f" + testHttps("https://www.cloudflare.com/cdn-cgi/trace"));
+        sendDiagnostic(sender, "§eПроверка исходящего HTTPS (GitHub)... §f" + testHttps("https://github.com/"));
 
-        sender.sendMessage("§eПроверка фонового процесса (10 секунд наблюдения)... §f" + testLongRunningProcess());
+        sendDiagnostic(sender, "§eПроверка фонового процесса (10 секунд наблюдения)... §f" + testLongRunningProcess());
 
         Path cloudflared = findExecutable("cloudflared");
         if (cloudflared == null) {
-            sender.sendMessage("§eCloudflared: §cне найден в PATH");
-            sender.sendMessage("§7  Программа может быть просто не установлена — это не доказывает запрет хостинга.");
+            sendDiagnostic(sender, "§eCloudflared: §cне найден в PATH");
+            sendDiagnostic(sender, "§7  Программа может быть просто не установлена — это не доказывает запрет хостинга.");
         } else {
-            sender.sendMessage("§eCloudflared: §aнайден §f" + cloudflared);
-            sender.sendMessage("§7  " + runDiagnosticProcess(cloudflared, "--version"));
+            sendDiagnostic(sender, "§eCloudflared: §aнайден §f" + cloudflared);
+            sendDiagnostic(sender, "§7  " + runDiagnosticProcess(cloudflared, "--version"));
         }
 
-        sender.sendMessage("§eFoxBridge API bind: §f" + getConfig().getString("server.bind_address", "127.0.0.1")
-                + ":" + getConfig().getInt("server.port", 25965));
-        sender.sendMessage("§eTLS API: §f" + (getConfig().getBoolean("tls.enabled", false) ? "включён" : "выключен"));
-        sender.sendMessage("§aДиагностика завершена. Настройки и сетевые порты не изменялись.");
-        sender.sendMessage("§6==================================================");
+        sendDiagnostic(sender, "§eFoxBridge API bind: §f" + bind + ":" + port);
+        sendDiagnostic(sender, "§eTLS API: §f" + (tls ? "включён" : "выключен"));
+        sendDiagnostic(sender, "§aДиагностика завершена. Настройки и сетевые порты не изменялись.");
+        sendDiagnostic(sender, "§6==================================================");
     }
 
     private void sendDiagnostic(CommandSender sender, String message) {
