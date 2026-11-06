@@ -3,7 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2026-11-06"
 compatibility_flags = ["nodejs_compat"]
 
-# Set FOXBRIDGE_API_KEY_HEADER to the exact API-key header used by FoxBridge.
 
 # Set secrets with:
 # npx wrangler secret put MCP_ACCESS_TOKEN
