@@ -2,9 +2,10 @@ name: Build FoxBridge
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, feature/mcp-server ]
     paths:
       - 'src/**'
+      - 'src/main/resources/**'
       - 'pom.xml'
       - '.github/workflows/build.yml'
 jobs:
