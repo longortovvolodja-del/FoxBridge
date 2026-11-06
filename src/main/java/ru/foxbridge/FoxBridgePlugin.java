@@ -163,7 +163,7 @@ public final class FoxBridgePlugin extends JavaPlugin implements CommandExecutor
                 if (ex.getRequestMethod().equals("GET") && path.equals("/v1/status")) {
                     send(ex, 200, "{\"ok\":true,\"name\":\"FoxBridge\",\"version\":\"1.0.0\",\"server\":\"Paper\",\"minecraft\":\"1.18.2\"}");
                 } else if (ex.getRequestMethod().equals("GET") && path.equals("/v1/plugins")) {
-                    String result = Bukkit.getScheduler().callSyncMethod(FoxBridgePlugin.this, this::pluginsJson).get(5, TimeUnit.SECONDS);
+                    String result = Bukkit.getScheduler().callSyncMethod(FoxBridgePlugin.this, FoxBridgePlugin.this::pluginsJson).get(5, TimeUnit.SECONDS);
                     send(ex, 200, result);
                 } else if (ex.getRequestMethod().equals("GET") && path.equals("/v1/files")) {
                     send(ex, 200, list(q.getOrDefault("path", "plugins")));
