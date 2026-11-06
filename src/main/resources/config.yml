@@ -1,0 +1,19 @@
+# FoxBridge 1.0.0
+# Secure default: local access only. Remote access requires TLS.
+server:
+  bind_address: "127.0.0.1"
+  port: 25965
+  backlog: 16
+security:
+  max_requests_per_minute_per_ip: 60
+access:
+  allow_plugins_directory: true
+  allow_logs_directory: true
+  max_read_bytes: 524288
+  max_upload_bytes: 67108864
+uploads:
+  enabled: true
+tls:
+  enabled: false
+  keystore: "foxbridge.p12"
+  password: "CHANGE_THIS"
